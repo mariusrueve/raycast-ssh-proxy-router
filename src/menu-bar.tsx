@@ -1,4 +1,4 @@
-import { MenuBarExtra, open, openExtensionPreferences, showToast, Toast } from "@raycast/api";
+import { Color, Icon, MenuBarExtra, open, openExtensionPreferences, showToast, Toast } from "@raycast/api";
 import { useCallback, useEffect, useState } from "react";
 import {
   getPrimaryURL,
@@ -96,32 +96,32 @@ export default function Command() {
 
   return (
     <MenuBarExtra
-      icon={running ? "active.svg" : "inactive.svg"}
+      icon={{ source: Icon.Network, tintColor: running ? Color.Green : Color.SecondaryText }}
       tooltip={status?.detail ?? "Checking SSH Proxy Router…"}
       isLoading={isLoading}
     >
       <MenuBarExtra.Item
         title={running ? "Website routing is active" : degraded ? "Website routing needs repair" : "Website routing is stopped"}
         subtitle={status?.detail}
-        icon={running ? "active.svg" : "inactive.svg"}
+        icon={{ source: degraded ? Icon.Hammer : Icon.Network, tintColor: running ? Color.Green : Color.SecondaryText }}
         onAction={refresh}
       />
       <MenuBarExtra.Separator />
       <MenuBarExtra.Item
         title={running ? "Stop SSH Proxy Router" : degraded ? "Repair SSH Proxy Router" : "Start SSH Proxy Router"}
-        icon={running ? "stop.svg" : "active.svg"}
+        icon={running ? Icon.StopFilled : degraded ? Icon.Hammer : Icon.PlayFilled}
         onAction={toggle}
       />
-      <MenuBarExtra.Item title="Open Primary Website" icon="safari.svg" onAction={() => openWebsite(getPrimaryURL())} />
-      <MenuBarExtra.Submenu title="Open Routed Website" icon="safari.svg">
+      <MenuBarExtra.Item title="Open Primary Website" icon={Icon.Globe} onAction={() => openWebsite(getPrimaryURL())} />
+      <MenuBarExtra.Submenu title="Open Routed Website" icon={Icon.Globe}>
         {routedWebsites.map((website) => (
           <MenuBarExtra.Item key={`${website.title}-${website.url}`} title={website.title} onAction={() => openWebsite(website.url)} />
         ))}
       </MenuBarExtra.Submenu>
-      <MenuBarExtra.Item title="Test Routed Websites" icon="test.svg" onAction={test} />
+      <MenuBarExtra.Item title="Test Routed Websites" icon={Icon.CheckCircle} onAction={test} />
       <MenuBarExtra.Separator />
-      <MenuBarExtra.Item title="Extension Settings…" icon="refresh.svg" onAction={openExtensionPreferences} />
-      <MenuBarExtra.Item title="Refresh Status" icon="refresh.svg" onAction={refresh} />
+      <MenuBarExtra.Item title="Extension Settings…" icon={Icon.Gear} onAction={openExtensionPreferences} />
+      <MenuBarExtra.Item title="Refresh Status" icon={Icon.ArrowClockwise} onAction={refresh} />
     </MenuBarExtra>
   );
 }

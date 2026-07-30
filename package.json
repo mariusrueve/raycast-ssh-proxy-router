@@ -3,7 +3,7 @@
   "name": "ssh-proxy-router",
   "title": "SSH Proxy Router",
   "description": "Route selected websites through an SSH SOCKS proxy while all other traffic remains direct.",
-  "icon": "active.png",
+  "icon": "tunnel-route-icon.png",
   "author": "marius",
   "license": "MIT",
   "commands": [

@@ -89,7 +89,15 @@ When started, the extension:
 4. Saves the current automatic-proxy settings for each selected macOS network service.
 5. Enables the localhost PAC URL.
 
-Stopping the extension restores the saved proxy settings and removes both LaunchAgents. Raycast itself does not need to stay open for the tunnel to remain active.
+Stopping the extension restores the saved proxy settings, unloads both LaunchAgents, and marks them disabled. Their stable plist files remain installed so macOS does not treat every later start as newly installed background software. Raycast itself does not need to stay open for the tunnel to remain active.
+
+### Background activity and battery use
+
+While routing is active, the SSH tunnel and the local Python PAC server remain running as background LaunchAgents. A healthy idle tunnel does very little work: SSH checks an otherwise idle connection once per minute, and the PAC server waits for local requests without writing routine access logs.
+
+If the gateway or DNS is unavailable, `launchd` restarts SSH at most once per minute. The menu-bar status reports the last SSH exit code and reconnect attempt information when available. Its automatic status check runs every five minutes; **Refresh Status** and all menu actions still check immediately.
+
+Stopping the router unloads and disables both LaunchAgents. To compare energy use while running and stopped, open **Activity Monitor → Energy**, enable the **Idle Wake Ups** column, and compare **Energy Impact** over several minutes. You can also run `pmset -g assertions` in Terminal to confirm that the router is not preventing system sleep.
 
 ## Troubleshooting
 
@@ -98,7 +106,9 @@ Stopping the extension restores the saved proxy settings and removes both Launch
 - If a host is not routed, enter only its hostname or a supported `*.` wildcard—not a general glob or regular expression.
 - Use **Test Routed Websites** from the menu bar to check the configured exact hosts through the tunnel.
 - Runtime logs are stored in `~/.local/state/raycast-ssh-proxy-router/`.
+- A **Reconnecting** status means the SSH LaunchAgent is loaded but its local SOCKS port is not ready. Check `ssh-tunnel.log` for DNS, authentication, or gateway failures; retries are limited to once per minute.
 - If settings were changed while active, use **Repair SSH Proxy Router**.
+- On the first activation, macOS may disclose that `ssh` and `python3` can run in the background. These are the two local LaunchAgents used for the tunnel and PAC server. Later stop/start cycles reuse those registrations instead of recreating them.
 
 ## Development
 

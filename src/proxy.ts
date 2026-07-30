@@ -19,11 +19,14 @@ const PAC_LAUNCHD_LABEL = "com.raycast.ssh-proxy-router.pac";
 const SSH_LAUNCHD_LABEL = "com.raycast.ssh-proxy-router.ssh";
 const STATE_DIR = path.join(homedir(), ".local", "state", "raycast-ssh-proxy-router");
 const PAC_FILE = path.join(STATE_DIR, "proxy.pac");
+const PAC_SERVER_FILE = path.join(STATE_DIR, "pac-server.py");
 const PAC_LOG_FILE = path.join(STATE_DIR, "pac-server.log");
 const SSH_LOG_FILE = path.join(STATE_DIR, "ssh-tunnel.log");
 const PROXY_BACKUP_FILE = path.join(STATE_DIR, "automatic-proxy-backup.json");
 const PAC_LAUNCH_AGENT_FILE = path.join(homedir(), "Library", "LaunchAgents", `${PAC_LAUNCHD_LABEL}.plist`);
 const SSH_LAUNCH_AGENT_FILE = path.join(homedir(), "Library", "LaunchAgents", `${SSH_LAUNCHD_LABEL}.plist`);
+const LAUNCHD_THROTTLE_SECONDS = 60;
+const SSH_SERVER_ALIVE_INTERVAL_SECONDS = 60;
 
 export type Preferences = {
   sshUser: string;
@@ -62,6 +65,13 @@ type SavedProxySetting = {
 type RouteRule = {
   host: string;
   wildcard: boolean;
+};
+
+type LaunchdJobInfo = {
+  loaded: boolean;
+  state?: string;
+  runs?: number;
+  lastExitCode?: number;
 };
 
 export type RoutedWebsite = {
@@ -195,8 +205,42 @@ function launchdTarget(label: string): string {
   return `gui/${process.getuid!()}/${label}`;
 }
 
+async function launchdJobInfo(label: string): Promise<LaunchdJobInfo> {
+  let output: string;
+  try {
+    output = await execute(LAUNCHCTL, ["print", launchdTarget(label)]);
+  } catch {
+    return { loaded: false };
+  }
+
+  const parseNumber = (pattern: RegExp): number | undefined => {
+    const match = output.match(pattern)?.[1];
+    if (match === undefined) return undefined;
+    const parsed = Number(match);
+    return Number.isInteger(parsed) ? parsed : undefined;
+  };
+
+  return {
+    loaded: true,
+    state: output.match(/^\s*state = (.+)$/m)?.[1]?.trim(),
+    runs: parseNumber(/^\s*runs = (-?\d+)$/m),
+    lastExitCode: parseNumber(/^\s*last exit code = (-?\d+)$/m),
+  };
+}
+
 function xmlEscape(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    const detail = error as NodeJS.ErrnoException;
+    if (detail.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 async function isPortOpen(port: number): Promise<boolean> {
@@ -224,11 +268,11 @@ async function waitUntil(check: () => Promise<boolean>, timeoutMs: number): Prom
 }
 
 async function tunnelRunning(config: Config): Promise<boolean> {
-  return (await succeeds(LAUNCHCTL, ["print", launchdTarget(SSH_LAUNCHD_LABEL)])) && (await isPortOpen(config.socksPort));
+  return (await launchdJobInfo(SSH_LAUNCHD_LABEL)).loaded && (await isPortOpen(config.socksPort));
 }
 
 async function pacServerRunning(config: Config): Promise<boolean> {
-  return (await succeeds(LAUNCHCTL, ["print", launchdTarget(PAC_LAUNCHD_LABEL)])) && (await isPortOpen(config.pacPort));
+  return (await launchdJobInfo(PAC_LAUNCHD_LABEL)).loaded && (await isPortOpen(config.pacPort));
 }
 
 async function listNetworkServices(config: Config): Promise<string[]> {
@@ -337,6 +381,31 @@ async function writePacFile(config: Config): Promise<void> {
   await fs.writeFile(PAC_FILE, script);
 }
 
+async function writeFileIfChanged(filePath: string, contents: string): Promise<void> {
+  try {
+    if ((await fs.readFile(filePath, "utf8")) === contents) return;
+  } catch (error) {
+    const detail = error as NodeJS.ErrnoException;
+    if (detail.code !== "ENOENT") throw error;
+  }
+  await fs.writeFile(filePath, contents);
+}
+
+async function enableLaunchAgent(label: string): Promise<void> {
+  await execute(LAUNCHCTL, ["enable", launchdTarget(label)]);
+}
+
+async function disableLaunchAgent(label: string, filePath: string): Promise<void> {
+  try {
+    await fs.access(filePath);
+  } catch (error) {
+    const detail = error as NodeJS.ErrnoException;
+    if (detail.code === "ENOENT") return;
+    throw error;
+  }
+  await execute(LAUNCHCTL, ["disable", launchdTarget(label)]);
+}
+
 async function startPacServer(config: Config): Promise<void> {
   await writePacFile(config);
   await fs.mkdir(path.dirname(PAC_LAUNCH_AGENT_FILE), { recursive: true });
@@ -345,7 +414,23 @@ async function startPacServer(config: Config): Promise<void> {
     await succeeds(LAUNCHCTL, ["bootout", launchdTarget(PAC_LAUNCHD_LABEL)]);
   }
 
-  const argumentsList = [PYTHON, "-m", "http.server", String(config.pacPort), "--bind", "127.0.0.1", "--directory", STATE_DIR];
+  const pacServer = [
+    "from functools import partial",
+    "from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer",
+    "import sys",
+    "",
+    "class QuietHandler(SimpleHTTPRequestHandler):",
+    "    def log_message(self, format, *args):",
+    "        pass",
+    "",
+    "handler = partial(QuietHandler, directory=sys.argv[2])",
+    'server = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), handler)',
+    "server.serve_forever()",
+    "",
+  ].join("\n");
+  await writeFileIfChanged(PAC_SERVER_FILE, pacServer);
+
+  const argumentsList = [PYTHON, PAC_SERVER_FILE, String(config.pacPort), STATE_DIR];
   const plist = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -357,6 +442,7 @@ async function startPacServer(config: Config): Promise<void> {
     "  </array>",
     "  <key>RunAtLoad</key><true/>",
     "  <key>KeepAlive</key><true/>",
+    `  <key>ThrottleInterval</key><integer>${LAUNCHD_THROTTLE_SECONDS}</integer>`,
     "  <key>ProcessType</key><string>Background</string>",
     "  <key>StandardOutPath</key>",
     `  <string>${xmlEscape(PAC_LOG_FILE)}</string>`,
@@ -366,7 +452,8 @@ async function startPacServer(config: Config): Promise<void> {
     "",
   ].join("\n");
 
-  await fs.writeFile(PAC_LAUNCH_AGENT_FILE, plist);
+  await writeFileIfChanged(PAC_LAUNCH_AGENT_FILE, plist);
+  await enableLaunchAgent(PAC_LAUNCHD_LABEL);
   await execute(LAUNCHCTL, ["bootstrap", `gui/${process.getuid!()}`, PAC_LAUNCH_AGENT_FILE]);
   if (!(await waitUntil(() => pacServerRunning(config), 5_000))) {
     throw new Error(`The local PAC server did not start on port ${config.pacPort}.`);
@@ -374,10 +461,10 @@ async function startPacServer(config: Config): Promise<void> {
 }
 
 async function stopPacServer(): Promise<void> {
+  await disableLaunchAgent(PAC_LAUNCHD_LABEL, PAC_LAUNCH_AGENT_FILE);
   if (await succeeds(LAUNCHCTL, ["print", launchdTarget(PAC_LAUNCHD_LABEL)])) {
     await succeeds(LAUNCHCTL, ["bootout", launchdTarget(PAC_LAUNCHD_LABEL)]);
   }
-  await fs.rm(PAC_LAUNCH_AGENT_FILE, { force: true });
 }
 
 async function startTunnel(config: Config): Promise<boolean> {
@@ -404,7 +491,7 @@ async function startTunnel(config: Config): Promise<boolean> {
     "-o",
     "ConnectTimeout=10",
     "-o",
-    "ServerAliveInterval=30",
+    `ServerAliveInterval=${SSH_SERVER_ALIVE_INTERVAL_SECONDS}`,
     "-o",
     "ServerAliveCountMax=3",
   ];
@@ -422,7 +509,7 @@ async function startTunnel(config: Config): Promise<boolean> {
     "  </array>",
     "  <key>RunAtLoad</key><true/>",
     "  <key>KeepAlive</key><true/>",
-    "  <key>ThrottleInterval</key><integer>10</integer>",
+    `  <key>ThrottleInterval</key><integer>${LAUNCHD_THROTTLE_SECONDS}</integer>`,
     "  <key>ProcessType</key><string>Background</string>",
     "  <key>StandardOutPath</key>",
     `  <string>${xmlEscape(SSH_LOG_FILE)}</string>`,
@@ -434,7 +521,8 @@ async function startTunnel(config: Config): Promise<boolean> {
 
   await fs.mkdir(STATE_DIR, { recursive: true });
   await fs.mkdir(path.dirname(SSH_LAUNCH_AGENT_FILE), { recursive: true });
-  await fs.writeFile(SSH_LAUNCH_AGENT_FILE, plist);
+  await writeFileIfChanged(SSH_LAUNCH_AGENT_FILE, plist);
+  await enableLaunchAgent(SSH_LAUNCHD_LABEL);
   await execute(LAUNCHCTL, ["bootstrap", `gui/${process.getuid!()}`, SSH_LAUNCH_AGENT_FILE]);
   const ready = await waitUntil(() => tunnelRunning(config), config.startTimeoutMs);
   if (!ready) {
@@ -445,10 +533,10 @@ async function startTunnel(config: Config): Promise<boolean> {
 }
 
 async function stopTunnel(_config: Config): Promise<void> {
+  await disableLaunchAgent(SSH_LAUNCHD_LABEL, SSH_LAUNCH_AGENT_FILE);
   if (await succeeds(LAUNCHCTL, ["print", launchdTarget(SSH_LAUNCHD_LABEL)])) {
     await succeeds(LAUNCHCTL, ["bootout", launchdTarget(SSH_LAUNCHD_LABEL)]);
   }
-  await fs.rm(SSH_LAUNCH_AGENT_FILE, { force: true });
 }
 
 export function getPrimaryURL(): string {
@@ -473,20 +561,44 @@ export function shouldOpenInSafari(): boolean {
 
 export async function getProxyStatus(): Promise<ProxyStatus> {
   const config = getConfig();
-  const [sshAgent, socksPort, pacServer, routing] = await Promise.all([
-    succeeds(LAUNCHCTL, ["print", launchdTarget(SSH_LAUNCHD_LABEL)]),
+  const [sshAgent, pacAgent, hasProxyBackup] = await Promise.all([
+    launchdJobInfo(SSH_LAUNCHD_LABEL),
+    launchdJobInfo(PAC_LAUNCHD_LABEL),
+    fileExists(PROXY_BACKUP_FILE),
+  ]);
+
+  if (!sshAgent.loaded && !pacAgent.loaded && !hasProxyBackup) {
+    return {
+      running: false,
+      degraded: false,
+      detail: "Stopped — all websites use the normal network route.",
+      tunnel: false,
+      pacServer: false,
+      routing: false,
+    };
+  }
+
+  const [socksPort, pacPort, routing] = await Promise.all([
     isPortOpen(config.socksPort),
-    pacServerRunning(config),
+    isPortOpen(config.pacPort),
     routingConfigured(config),
   ]);
-  const tunnel = sshAgent && socksPort;
+  const tunnel = sshAgent.loaded && socksPort;
+  const pacServer = pacAgent.loaded && pacPort;
   const running = tunnel && pacServer && routing;
-  const degraded = !running && (sshAgent || socksPort || pacServer || routing);
+  const degraded = !running;
+  const sshRetryDetail = [
+    sshAgent.state ? `launchd ${sshAgent.state}` : undefined,
+    sshAgent.runs !== undefined ? `attempt ${sshAgent.runs}` : undefined,
+    sshAgent.lastExitCode !== undefined ? `last exit code ${sshAgent.lastExitCode}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(", ");
   const detail = running
     ? `Running — ${config.routedHosts.length} host rule${config.routedHosts.length === 1 ? " uses" : "s use"} SOCKS on localhost:${config.socksPort}.`
-    : degraded
-      ? `Degraded — tunnel ${tunnel ? "on" : "off"}, PAC ${pacServer ? "on" : "off"}, routing ${routing ? "on" : "off"}.`
-      : "Stopped — all websites use the normal network route.";
+    : sshAgent.loaded && !socksPort
+      ? `Reconnecting — SSH ${sshRetryDetail || "is not ready"}; retries at most once per minute.`
+      : `Degraded — tunnel ${tunnel ? "on" : "off"}, PAC ${pacServer ? "on" : "off"}, routing ${routing ? "on" : "off"}.`;
   return { running, degraded, detail, tunnel, pacServer, routing };
 }
 

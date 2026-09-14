@@ -101,7 +101,13 @@ export default function Command() {
       isLoading={isLoading}
     >
       <MenuBarExtra.Item
-        title={running ? "Website routing is active" : degraded ? "Website routing needs repair" : "Website routing is stopped"}
+        title={
+          running
+            ? "Website routing is active"
+            : degraded
+              ? "Website routing needs repair"
+              : "Website routing is stopped"
+        }
         subtitle={status?.detail}
         icon={{ source: degraded ? Icon.Hammer : Icon.Network, tintColor: running ? Color.Green : Color.SecondaryText }}
         onAction={refresh}
@@ -115,7 +121,11 @@ export default function Command() {
       <MenuBarExtra.Item title="Open Primary Website" icon={Icon.Globe} onAction={() => openWebsite(getPrimaryURL())} />
       <MenuBarExtra.Submenu title="Open Routed Website" icon={Icon.Globe}>
         {routedWebsites.map((website) => (
-          <MenuBarExtra.Item key={`${website.title}-${website.url}`} title={website.title} onAction={() => openWebsite(website.url)} />
+          <MenuBarExtra.Item
+            key={`${website.title}-${website.url}`}
+            title={website.title}
+            onAction={() => openWebsite(website.url)}
+          />
         ))}
       </MenuBarExtra.Submenu>
       <MenuBarExtra.Item title="Test Routed Websites" icon={Icon.CheckCircle} onAction={test} />

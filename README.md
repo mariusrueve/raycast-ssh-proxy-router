@@ -18,8 +18,8 @@ The extension provides a Raycast command and menu-bar item for starting, stoppin
 ## Requirements
 
 - macOS
-- [Raycast](https://www.raycast.com/)
-- Node.js 22 or newer and npm
+- The latest [Raycast](https://www.raycast.com/) for macOS (v2)
+- Node.js 22.22.2 or newer and npm
 - Working SSH key or SSH-agent access to a gateway that can reach the desired websites
 
 Connect to the SSH gateway once in Terminal before using the extension. This lets SSH confirm the gateway's host key and verifies that authentication works:
@@ -49,23 +49,25 @@ npm install
 npm run dev
 ```
 
+This extension uses Raycast SDK 2.4.1. When migrating from Raycast v1, update the Raycast app and Node.js first, then run the update commands above to rebuild and register the extension with Raycast v2. Existing extension preferences and SSH proxy state use the same identifiers and paths.
+
 ## Configuration
 
 Open **Raycast Settings → Extensions → SSH Proxy Router**.
 
-| Setting | Description | Example |
-| --- | --- | --- |
-| SSH User | Account on the SSH gateway | `username` |
-| SSH Gateway | Gateway that can reach the private websites | `gateway.example.com` |
-| SSH Port | Gateway's SSH port | `22` |
-| SSH Identity File | Optional private key; leave empty to use the SSH agent/config | `~/.ssh/id_ed25519` |
-| Routed Websites | Comma-separated exact hosts, URLs, or wildcard hosts | `wiki.example.com, *.corp.example.com` |
-| Primary Website URL | Optional URL used by **Open Primary Website** | `https://wiki.example.com` |
-| Local SOCKS Port | Local dynamic-forward port | `1080` |
-| Local PAC Port | Local PAC-file server port | `18080` |
-| Start Timeout | Seconds allowed for SSH startup | `15` |
-| Network Services | Optional comma-separated macOS services; empty applies to every enabled service | `Wi-Fi` |
-| Open in Safari | Open menu-bar website actions specifically in Safari | Enabled |
+| Setting             | Description                                                                     | Example                                |
+| ------------------- | ------------------------------------------------------------------------------- | -------------------------------------- |
+| SSH User            | Account on the SSH gateway                                                      | `username`                             |
+| SSH Gateway         | Gateway that can reach the private websites                                     | `gateway.example.com`                  |
+| SSH Port            | Gateway's SSH port                                                              | `22`                                   |
+| SSH Identity File   | Optional private key; leave empty to use the SSH agent/config                   | `~/.ssh/id_ed25519`                    |
+| Routed Websites     | Comma-separated exact hosts, URLs, or wildcard hosts                            | `wiki.example.com, *.corp.example.com` |
+| Primary Website URL | Optional URL used by **Open Primary Website**                                   | `https://wiki.example.com`             |
+| Local SOCKS Port    | Local dynamic-forward port                                                      | `1080`                                 |
+| Local PAC Port      | Local PAC-file server port                                                      | `18080`                                |
+| Start Timeout       | Seconds allowed for SSH startup                                                 | `15`                                   |
+| Network Services    | Optional comma-separated macOS services; empty applies to every enabled service | `Wi-Fi`                                |
+| Open in Safari      | Open menu-bar website actions specifically in Safari                            | Enabled                                |
 
 ### Routing rules
 
@@ -116,8 +118,35 @@ Stopping the router unloads and disables both LaunchAgents. To compare energy us
 npm install
 npm run build
 npm run lint
+npm run format:check
 npm run dev
 ```
+
+`npm run lint` validates the Raycast manifest and assets and runs ESLint and Prettier. Use `npm run format` to apply formatting changes.
+
+### Testing without the GUI
+
+```sh
+npm test           # Offline behavior tests; no SSH or system changes
+npm run check      # Formatting, lint, offline tests, and Raycast build
+npm run test:live  # Read-only diagnostics against the active router (macOS)
+```
+
+Offline tests use Node's built-in test runner and temporary state directories with simulated system commands. They cover host matching, PAC generation, status detection, startup failures, and restoration of previous proxy settings. Test compilation uses the existing TypeScript dependency and writes to the ignored `.test-dist/` directory. The full `check` command also needs access to Raycast's online manifest validation and local extension build directory.
+
+The live test uses `~/.local/state/raycast-ssh-proxy-router/diagnostic-config.json`. The updated Raycast extension saves this minimal snapshot after a successful start or healthy status refresh. For the first run after updating, load the extension with `npm run dev` and refresh its menu-bar status once (or allow the scheduled refresh to run). An already-active tunnel does not need restarting. Once the snapshot exists, repeat live tests entirely from the terminal.
+
+The snapshot records the active host rules, primary URL, local ports, and network services. It excludes SSH connection credentials and identity-file paths, is written with owner-only permissions, and is retained when routing stops. A live test verifies the actual running state rather than treating an existing snapshot as proof that routing is active. Changes made only in Raycast preferences are not active settings until the router is repaired or restarted.
+
+`test:live` checks the LaunchAgents and listeners, each saved service's macOS PAC setting, the served PAC content and routing decisions, and website reachability through SOCKS with remote DNS and TLS verification. Raycast's **Test Routed Websites** action runs the same diagnostics. The terminal command prints `PASS`, `FAIL`, or `SKIPPED` for each check and exits nonzero if any check fails or cannot run. It never starts or stops agents, writes router state, or changes proxy settings; compilation only updates local build artifacts.
+
+- **Missing or invalid snapshot:** load the updated extension and refresh its healthy menu-bar status once.
+- **Missing agent or listener:** the router is stopped or reconnecting; start it or resolve the SSH connection issue before testing again.
+- **PAC settings/content mismatch:** use **Repair SSH Proxy Router**, then rerun the live test.
+- **Website failure:** inspect the reported DNS, TLS, connection, or timeout error. Each request allows 20 seconds; the PAC fetch allows five seconds.
+- **HTTP 401/403 or another HTTP response:** transport reachability succeeded; the reported status does not prove login or application health. Redirects are not followed.
+
+Live tests cover the primary URL and each additional exact-host rule, deduplicated by hostname. Wildcards are tested as PAC decisions rather than by requesting arbitrary subdomains. Routine changes need no GUI testing, but occasional Raycast/Safari smoke tests remain useful for menu rendering and Safari's own use of system PAC settings.
 
 ## License
 

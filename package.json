@@ -6,6 +6,12 @@
   "icon": "tunnel-route-icon.png",
   "author": "marius",
   "license": "MIT",
+  "platforms": [
+    "macOS"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
   "commands": [
     {
       "name": "menu-bar",
@@ -21,7 +27,14 @@
       "subtitle": "Selective Website Routing",
       "description": "Start or stop selective website routing through SSH",
       "mode": "no-view",
-      "keywords": ["proxy", "ssh", "safari", "tunnel", "socks", "pac"]
+      "keywords": [
+        "proxy",
+        "ssh",
+        "safari",
+        "tunnel",
+        "socks",
+        "pac"
+      ]
     }
   ],
   "preferences": [
@@ -116,16 +129,25 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.104.19"
+    "@raycast/api": "^2.4.1"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "@types/react": "^19.0.0",
+    "@raycast/eslint-config": "^2.2.0",
+    "@types/node": "22.19.17",
+    "@types/react": "19.0.10",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6",
     "typescript": "^5.8.0"
   },
   "scripts": {
     "build": "ray build -e dist",
     "dev": "ray develop",
-    "lint": "ray lint"
+    "lint": "ray lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:build": "node scripts/clean-tests.mjs && tsc -p tsconfig.test.json",
+    "test": "npm run test:build && node --test .test-dist/tests/*.test.js",
+    "test:live": "npm run test:build && node .test-dist/scripts/test-live.js",
+    "check": "npm run format:check && npm run lint && npm test && npm run build"
   }
 }

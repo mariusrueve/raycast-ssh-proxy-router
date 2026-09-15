@@ -4,7 +4,7 @@
   "title": "SSH Proxy Router",
   "description": "Route selected websites through an SSH SOCKS proxy while all other traffic remains direct.",
   "icon": "tunnel-route-icon.png",
-  "author": "marius",
+  "author": "mariusrueve",
   "license": "MIT",
   "platforms": [
     "macOS"
@@ -148,6 +148,13 @@
     "test:build": "node scripts/clean-tests.mjs && tsc -p tsconfig.test.json",
     "test": "npm run test:build && node --test .test-dist/tests/*.test.js",
     "test:live": "npm run test:build && node .test-dist/scripts/test-live.js",
-    "check": "npm run format:check && npm run lint && npm test && npm run build"
-  }
+    "check": "npm run format:check && npm run lint && npm run lint:all && npm test && npm run build",
+    "lint:all": "eslint .",
+    "bundle": "ray bundle -o release/ssh-proxy-router.rayext",
+    "store:export": "node scripts/export-store.mjs"
+  },
+  "categories": [
+    "Developer Tools",
+    "System"
+  ]
 }

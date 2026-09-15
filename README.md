@@ -19,7 +19,7 @@ The extension provides a Raycast command and menu-bar item for starting, stoppin
 
 - macOS
 - The latest [Raycast](https://www.raycast.com/) for macOS (v2)
-- Node.js 22.22.2 or newer and npm
+- Python 3 available at `/usr/bin/python3` for the local PAC server (verify with `/usr/bin/python3 --version`; on macOS this may require Apple's Command Line Tools)
 - Working SSH key or SSH-agent access to a gateway that can reach the desired websites
 
 Connect to the SSH gateway once in Terminal before using the extension. This lets SSH confirm the gateway's host key and verifies that authentication works:
@@ -29,6 +29,12 @@ ssh -p 22 username@gateway.example.com
 ```
 
 ## Installation
+
+The extension is being prepared for the Raycast Store. Until the submission is accepted, install from source as described below. Once published, users will be able to install it directly from Raycast's Store without Node.js or npm.
+
+### Install from source
+
+Source installation and development require Node.js 22.22.2 or newer and npm.
 
 Clone the repository and install its dependencies:
 
@@ -113,6 +119,8 @@ Stopping the router unloads and disables both LaunchAgents. To compare energy us
 - On the first activation, macOS may disclose that `ssh` and `python3` can run in the background. These are the two local LaunchAgents used for the tunnel and PAC server. Later stop/start cycles reuse those registrations instead of recreating them.
 
 ## Development
+
+CI runs formatting, lint, offline tests, and the distribution build on macOS for each push to `main` and pull request. See [Publishing](PUBLISHING.md) for manually triggered release builds and Store submissions.
 
 ```sh
 npm install

@@ -2,3 +2,4 @@ dist/
 node_modules/
 raycast-env.d.ts
 .test-dist/
+release/
